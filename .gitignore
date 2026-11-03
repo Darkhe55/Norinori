@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output (regenerate with `npm run build`)
+dist/
+
+# Playwright / Edge test artifacts — contains browser profiles with
+# History / Cookies / Login Data / Web Data. Never commit.
+output/
+
+# Local scratch / generated test bundles
+temp/
+
+# Runtime save data (per-player progress, library, last puzzle)
+data/progress.json
+data/last-puzzle.json
+data/library.json
