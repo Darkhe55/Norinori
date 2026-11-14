@@ -14,6 +14,7 @@ import { regionCount } from './state'
 import { puzzles as builtinPuzzles, getPuzzle, getReferenceSolution, isLogicSolvable } from './puzzles'
 import { loadSavedPuzzles, savePuzzleToLibrary } from './library'
 import { randomRegions, mulberry32 } from './regions'
+import { recognizePuzzle } from './vision'
 import {
   clientToViewBox,
   hitTest,
@@ -96,7 +97,9 @@ app.innerHTML = `
       <div class="toolbar" style="margin-top:0">
         <button class="btn" id="btn-random" type="button">随机抽题</button>
         <button class="btn" id="btn-custom" type="button">自定义</button>
+        <button class="btn" id="btn-import" type="button">识图导入</button>
         <button class="btn" id="btn-mute" type="button">音效：开</button>
+        <input id="import-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
       </div>
       <div class="puzzle-list" id="puzzle-list"></div>
 
@@ -700,6 +703,61 @@ function toggleMute() {
   if (!next) resumeAudio()
 }
 
+// —— 识图导入 ——
+function timestampLabel(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
+}
+
+async function importPuzzleImage(file: File) {
+  setStatus(`识图中：${file.name}…`, 'solving')
+  const bitmap = await createImageBitmap(file)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) throw new Error('浏览器无法创建画布')
+    ctx.drawImage(bitmap, 0, 0)
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const result = recognizePuzzle({
+      width: pixels.width,
+      height: pixels.height,
+      data: pixels.data,
+    })
+    const tooSmall = result.diagnostics.regionSizes.filter((s) => s < 2).length
+    if (result.diagnostics.regionCount < 2 || tooSmall) {
+      throw new Error(result.warnings.join('；') || '识别出的区域不成立')
+    }
+    const puzzle: Puzzle = {
+      id: `import-${Date.now()}`,
+      name: `识图导入 · ${result.width}×${result.height} · ${timestampLabel()}`,
+      width: result.width,
+      height: result.height,
+      regions: result.regions,
+      difficulty: 'custom',
+    }
+    const area = puzzle.width * puzzle.height
+    const budget = area > 400 ? 6_000_000 : area > 100 ? 3_000_000 : 1_500_000
+    const check = countSolutions(puzzle, 2, budget)
+    if (!check.timedOut && check.count === 0) {
+      throw new Error('识别结果无解，可能不是海苔题图')
+    }
+    savePuzzleToLibrary(puzzle)
+    refreshLibrary()
+    selectPuzzle(puzzle)
+    const unique = check.timedOut ? '解数未知' : check.count >= 2 ? '多个解' : '唯一解'
+    const warn = result.warnings.length ? `（${result.warnings.join('；')}）` : ''
+    setStatus(
+      `识图成功：${result.width}×${result.height}，${result.diagnostics.regionCount} 个区域，${unique}。已存入题库。${warn}`,
+      'ok',
+    )
+  } finally {
+    bitmap.close()
+  }
+}
+
 // —— 自定义题板 ——
 const REGION_PALETTE = [
   '#dfe9e0',
@@ -1016,6 +1074,18 @@ $('#btn-hint').addEventListener('click', hint)
 $('#btn-random').addEventListener('click', pickRandomPuzzle)
 $('#btn-mute').addEventListener('click', toggleMute)
 $('#btn-custom').addEventListener('click', openCustomEditor)
+$('#btn-import').addEventListener('click', () => {
+  document.getElementById('import-file')?.click()
+})
+$('#import-file').addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  void importPuzzleImage(file).catch((err) => {
+    setStatus(`识图失败：${err instanceof Error ? err.message : String(err)}`, 'bad')
+  })
+})
 $('#custom-regen').addEventListener('click', regenCustomGrid)
 $('#custom-random').addEventListener('click', randomCustomRegions)
 $('#custom-apply').addEventListener('click', loadCustomPuzzle)
@@ -1198,4 +1268,5 @@ try {
   stopLogic,
   loadSavedPuzzles,
   countSolutions,
+  recognizePuzzle,
 }
