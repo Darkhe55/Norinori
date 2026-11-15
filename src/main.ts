@@ -106,8 +106,8 @@ app.innerHTML = `
       <div class="custom-editor" id="custom-editor" hidden>
         <h2>自定义题板</h2>
         <div class="custom-row">
-          <label>宽 <input id="custom-w" type="number" min="2" max="30" value="5" /></label>
-          <label>高 <input id="custom-h" type="number" min="2" max="30" value="5" /></label>
+          <label>宽 <input id="custom-w" type="number" min="2" max="60" value="5" /></label>
+          <label>高 <input id="custom-h" type="number" min="2" max="60" value="5" /></label>
           <button class="btn" id="custom-regen" type="button">生成网格</button>
           <button class="btn" id="custom-random" type="button">随机分区</button>
         </div>
@@ -903,8 +903,8 @@ function closeCustomEditor() {
 function readCustomSize() {
   const wEl = document.getElementById('custom-w') as HTMLInputElement | null
   const hEl = document.getElementById('custom-h') as HTMLInputElement | null
-  const w = Math.max(2, Math.min(30, Number(wEl?.value) || 5))
-  const h = Math.max(2, Math.min(30, Number(hEl?.value) || 5))
+  const w = Math.max(2, Math.min(60, Number(wEl?.value) || 5))
+  const h = Math.max(2, Math.min(60, Number(hEl?.value) || 5))
   if (wEl) wEl.value = String(w)
   if (hEl) hEl.value = String(h)
   return { w, h }
