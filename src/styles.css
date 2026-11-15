@@ -143,6 +143,53 @@ body {
   font-size: 12px;
 }
 
+/* 自定义题的「编辑 / 删除」操作 */
+.puzzle-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.puzzle-row .puzzle-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.puzzle-edit,
+.puzzle-del {
+  appearance: none;
+  flex: none;
+  min-width: 38px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbf8f1;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.puzzle-edit:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.puzzle-del:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.puzzle-del.confirm {
+  width: auto;
+  border-color: var(--error);
+  background: var(--error-soft);
+  color: var(--error);
+  font-weight: 600;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
