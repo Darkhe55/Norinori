@@ -78,24 +78,37 @@ src/
 
 ## 识图导入
 
-```bash
-# 只识别与校验，不写入
-npm run import-image -- 题图.png --dry-run
+浏览器里点「识图导入」选择题图即可；命令行与网页共用同一份 `src/vision.ts`：
 
-# 识别并写入题库
-npm run import-image -- 题图.png --name 题名
+```bash
+# 只识别、预览区域矩阵（默认不写盘）
+npm run import-image -- month.png
+
+# 写入题库（data/library.json）；小盘面想确认唯一解再加 --verify
+npm run import-image -- month.png --name 题名 --append
 
 # 导入后直接设为下次打开时载入的题目
-npm run import-image -- 题图.png --name 题名 --select
+npm run import-image -- month.png --name 题名 --append --select
 ```
 
 | 参数 | 说明 |
 |------|------|
 | `--name 名称` | 题库中显示的名称 |
-| `--id ID` | 指定题目 id |
-| `--select` | 导入后设为下次载入的题目 |
-| `--dry-run` | 只识别与校验，不写文件 |
-| `--force` | 区域过小或无解时仍强制导入 |
+| `--id ID` | 指定题目 id（默认 `import-时间戳`） |
+| `--append` | 写入 `data/library.json`；不加只预览 |
+| `--verify` | 唯一解校验（默认只识别，不解题） |
+| `--select` | 导入后设为下次载入的题目（隐含 `--append`） |
+| `--map x,y=区域号` | 人工修正区域：把格子 (x,y)（0 基）并到某区域；多个修正用分号分隔，如 `--map "3,7=2;4,7=2"` |
+| `--max-nodes N` | 解题搜索节点上限 |
+| `--skip-solve` | 跳过解题校验（只做区域检查） |
+| `--force` | 区域过小 / 无解 / 解不唯一时仍继续 |
+| `--json` | 输出机器可读结果 |
+
+说明：
+
+- 识别依据是「细格线 + 粗区域线」，每条格线单独判定粗线阈值（细线 1~2px、粗线 2~3px 的题图也能分开）；
+- 50×50 这类大盘面默认跳过解题校验（回溯搜索太慢，可显式 `--verify` 强制执行）；
+- 命令行区域矩阵与网页「识图导入」完全一致，`--map` 修正后浏览器刷新即可看到新题。
 
 ## 命令
 

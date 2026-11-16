@@ -280,7 +280,67 @@ export function recognizePuzzle(image: RgbaImage, opts: VisionOptions = {}): Vis
 
   const allWidths = [...vertical.flat(), ...horizontal.flat()]
   const cls = classifyWidths(allWidths)
-  const threshold = cls.threshold
+
+  /**
+   * 单条格线的粗细分类。
+   *
+   * 同一条格线在一次渲染里对齐是固定的，所以细线宽度恒定；只有区域边界
+   * 叠上去的位置才会变粗。按「线」分簇比全局分簇稳：常见题图里细线是
+   * 1~2px、粗线是 2~3px，全局混在一起时宽度集合会重叠（1,2,3），
+   * 无法用「最大值差距 ≥ 2」分开；而单条线上只会出现它自己的细/粗两档。
+   */
+  const classifyLine = (
+    values: number[],
+  ): { min: number; max: number; threshold: number | null } => {
+    let min = Infinity
+    let max = 0
+    for (const v of values) {
+      if (v <= 0) continue
+      if (v < min) min = v
+      if (v > max) max = v
+    }
+    if (!Number.isFinite(min) || max <= 0) return { min: 0, max: 0, threshold: null }
+    if (max - min < 1) return { min, max, threshold: null }
+    let thickCount = 0
+    for (const v of values) if (v > min) thickCount++
+    // 只有个别像素凑巧更粗时不认为是区域边界（避免噪点把盘面切碎）
+    if (thickCount < 2 || thickCount >= values.length) {
+      return { min, max, threshold: null }
+    }
+    return { min, max, threshold: (min + max) / 2 }
+  }
+
+  type LineInfo = { min: number; max: number; threshold: number | null }
+  const vInfo: LineInfo[] = Array.from({ length: xs.length }, () => ({
+    min: 0,
+    max: 0,
+    threshold: null,
+  }))
+  for (let k = 1; k < xs.length - 1; k++) {
+    vInfo[k] = classifyLine(vertical.map((row) => row[k - 1]!))
+  }
+  const hInfo: LineInfo[] = Array.from({ length: ys.length }, () => ({
+    min: 0,
+    max: 0,
+    threshold: null,
+  }))
+  for (let k = 1; k < ys.length - 1; k++) {
+    hInfo[k] = classifyLine(horizontal.map((col) => col[k - 1]!))
+  }
+
+  const boundaryLines = [...vInfo.slice(1, -1), ...hInfo.slice(1, -1)].filter(
+    (info) => info.threshold !== null,
+  )
+  // 一条粗线都没找到时退回全局分簇，兼容「线宽差距很大」的普通题图
+  const useGlobal = boundaryLines.length === 0
+  const thresholdOf = (info: LineInfo): number =>
+    useGlobal ? cls.threshold : (info.threshold ?? Number.POSITIVE_INFINITY)
+  const positiveMins = boundaryLines.map((i) => i.min).filter((v) => v > 0)
+  const thinWidth = positiveMins.length ? median(positiveMins) : cls.thin
+  const thickWidth = boundaryLines.length ? median(boundaryLines.map((i) => i.max)) : cls.thick
+  const borderThreshold = boundaryLines.length
+    ? median(boundaryLines.map((i) => i.threshold!))
+    : cls.threshold
 
   const n = cols * rows
   const parent = new Int32Array(n)
@@ -301,12 +361,12 @@ export function recognizePuzzle(image: RgbaImage, opts: VisionOptions = {}): Vis
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols - 1; c++) {
-      if (vertical[r]![c]! < threshold) union(r * cols + c, r * cols + c + 1)
+      if (vertical[r]![c]! < thresholdOf(vInfo[c + 1]!)) union(r * cols + c, r * cols + c + 1)
     }
   }
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows - 1; r++) {
-      if (horizontal[c]![r]! < threshold) union(r * cols + c, (r + 1) * cols + c)
+      if (horizontal[c]![r]! < thresholdOf(hInfo[r + 1]!)) union(r * cols + c, (r + 1) * cols + c)
     }
   }
 
@@ -328,7 +388,7 @@ export function recognizePuzzle(image: RgbaImage, opts: VisionOptions = {}): Vis
   const warnings: string[] = []
   if (!isRegular(xs)) warnings.push('竖格线间距不均匀，识别可能有误')
   if (!isRegular(ys)) warnings.push('横格线间距不均匀，识别可能有误')
-  if (cls.thick === 0) warnings.push('未区分出粗区域线，可能把整块盘面识别成了一个区域')
+  if (boundaryLines.length === 0) warnings.push('未区分出粗区域线，可能把整块盘面识别成了一个区域')
   const tooSmall = regionSizes.filter((s) => s < 2).length
   if (tooSmall) warnings.push(`${tooSmall} 个区域少于 2 格，题目无法成立`)
 
@@ -340,9 +400,9 @@ export function recognizePuzzle(image: RgbaImage, opts: VisionOptions = {}): Vis
       board,
       gridLinesX: xs,
       gridLinesY: ys,
-      thinWidth: cls.thin,
-      thickWidth: cls.thick,
-      borderThreshold: threshold,
+      thinWidth,
+      thickWidth,
+      borderThreshold,
       regionCount: idMap.size,
       regionSizes,
     },
