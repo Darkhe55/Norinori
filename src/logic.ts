@@ -1,5 +1,4 @@
 import type { CellState, GameState, Puzzle } from './types'
-import { CellState as CS } from './types'
 import { NorinoriEngine, type Decision, type RuleId } from './solver'
 
 export interface PlaybackFrame {
@@ -59,7 +58,7 @@ export function planLogicSolve(puzzle: Puzzle, cells: CellState[], maxTests = 40
     else streak = 1
     lastRule = d.rule
     frames.push({
-      change: { index: d.index, from: CS.Unknown, to: d.to },
+      change: { index: d.index, from: d.from, to: d.to },
       rule: d.rule,
       label: RULE_LABEL[d.rule],
       streak,

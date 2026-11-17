@@ -32,6 +32,8 @@ export type RuleId =
 
 export interface Decision {
   index: number
+  /** 推理前的值（当前盘面值）：回放帧的 from 必须用它，不能凭空当空盘 */
+  from: CellState
   to: CellState
   rule: RuleId
 }
@@ -110,7 +112,7 @@ export class NorinoriEngine {
     else if (from === UNK) this.regionUnknown[r]--
     if (val === ON) this.regionShaded[r]++
     else if (val === UNK) this.regionUnknown[r]++
-    if (out) out.push({ index: i, to: val, rule })
+    if (out) out.push({ index: i, from, to: val, rule })
   }
 
   /**
