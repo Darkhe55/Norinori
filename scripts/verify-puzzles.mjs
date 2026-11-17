@@ -28,6 +28,10 @@ const rawList = RAW_PUZZLES
 const validateRef = validate
 
 let failures = 0
+let logicFrames = 0
+let logicHypo = 0
+let logicSolved = 0
+let searchNodes = 0
 const fail = (msg) => {
   failures++
   console.error(`  [FAIL] ${msg}`)
@@ -103,13 +107,25 @@ for (const p of puzzles) {
   if (raw && raw.logic !== plan.solved) {
     problems.push(`logic 标注 ${raw.logic} 与实情 ${plan.solved} 不符`)
   }
+  const hypo = plan.frames.filter((f) => f.rule === 'hypo-shade' || f.rule === 'hypo-forbid').length
+  logicFrames += plan.frames.length
+  logicHypo += hypo
+  if (plan.solved) logicSolved++
+  searchNodes += r.nodes
 
   if (problems.length) {
     fail(`${p.id}: ${problems.join('；')}`)
   } else {
-    console.log(`  [OK] ${p.id} ${p.width}x${p.height} ${p.difficulty} logic=${plan.solved}`)
+    console.log(
+      `  [OK] ${p.id} ${p.width}x${p.height} ${p.difficulty} logic=${plan.solved}` +
+        ` · 逻辑 ${plan.frames.length} 帧（反证 ${hypo}）· 搜索 ${r.nodes} 节点`,
+    )
   }
 }
+console.log(
+  `[verify] 汇总：纯逻辑解出 ${logicSolved}/${puzzles.length} · 逻辑 ${logicFrames} 帧（反证 ${logicHypo}）` +
+    ` · 唯一解搜索合计 ${searchNodes} 节点`,
+)
 
 if (failures) {
   console.error(`[verify] ${failures} 道题有问题`)

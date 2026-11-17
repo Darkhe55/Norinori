@@ -33,6 +33,7 @@ const RULE_LABEL: Record<RuleId, string> = {
   'lone-partner': '孤黑格唯一出路，必须涂黑',
   'no-room': '放黑也成不了多米诺，只能涂白',
   'touch-clean': '候选邻格公共邻格必白',
+  'block-2x2': '小矩形内黑格数已满，其余涂白',
   'hypo-shade': '假设涂黑会矛盾，只能涂白',
   'hypo-forbid': '假设涂白会矛盾，必须涂黑',
 }

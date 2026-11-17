@@ -26,6 +26,7 @@ export type RuleId =
   | 'lone-partner'
   | 'no-room'
   | 'touch-clean'
+  | 'block-2x2'
   | 'hypo-shade'
   | 'hypo-forbid'
 
@@ -40,12 +41,14 @@ const ON = CS.Shaded
 const OFF = CS.Forbidden
 
 /**
- * Norinori 约束引擎：
- * - 黑格必须恰好有一个正交相邻黑格（多米诺）；
+ * Norinori 约束引擎。本作 validate() 的实际判定是：
+ * - 黑格必须恰好有一个正交相邻黑格（两两配对成多米诺）；
  * - 每区恰好 2 个黑格；
- * - 多米诺不得正交相邻（由上一条涵盖）。
+ * - 多米诺之间不得相贴（由「每个黑格恰好一个黑邻」涵盖）。
+ * 注意：判定并不要求「同一区的两黑格必须相邻」，参考解里存在跨区配对的多米诺，
+ * 所以引擎里不能使用「区内成对」类规则（那会对现有题库误判）。
  *
- * propagate() 做规则推理到饱和；search() 在推理之上按 MRV 回溯。
+ * propagate() 做可证明的局部规则推理到饱和；search() 在推理之上按 MRV 回溯。
  */
 export class NorinoriEngine {
   readonly w: number
@@ -60,8 +63,6 @@ export class NorinoriEngine {
   marks: Int8Array
   private regionShaded: Int32Array
   private regionUnknown: Int32Array
-  /** 区域计数自上次扫描后是否变过（驱动区域候选规则） */
-  private regionDirty: Uint8Array
 
   constructor(puzzle: Puzzle, marks?: Int8Array) {
     this.puzzle = puzzle
@@ -75,7 +76,6 @@ export class NorinoriEngine {
     this.regionId = puzzle.regions
     this.regionShaded = new Int32Array(this.regionTotal)
     this.regionUnknown = new Int32Array(this.regionTotal)
-    this.regionDirty = new Uint8Array(this.regionTotal).fill(1)
     this.marks = marks ? marks.slice() : new Int8Array(this.n).fill(UNK)
     this.recount()
   }
@@ -83,7 +83,6 @@ export class NorinoriEngine {
   private recount(): void {
     this.regionShaded.fill(0)
     this.regionUnknown.fill(0)
-    this.regionDirty.fill(1)
     for (let i = 0; i < this.n; i++) {
       const r = this.regionId[i]!
       const v = this.marks[i]!
@@ -111,35 +110,43 @@ export class NorinoriEngine {
     else if (from === UNK) this.regionUnknown[r]--
     if (val === ON) this.regionShaded[r]++
     else if (val === UNK) this.regionUnknown[r]++
-    // 区域组成变了 → 候选规则需要重扫
-    this.regionDirty[r] = 1
     if (out) out.push({ index: i, to: val, rule })
   }
 
   /**
    * 规则推理到饱和。返回 false 表示已矛盾。
    * out 非空时逐条记录推理过程（供逻辑回放）。
+   *
+   * 规则（都是对当前判定模型可证明的局部结论）：
+   *  - region-full  区域已满 2 黑 → 其余涂白；
+   *  - region-last  区域还需要 need 个黑格、可能变黑的格子恰为 need 个 → 全部涂黑；
+   *  - pair-clean   黑格已配上对（有黑邻）→ 其余邻格涂白；
+   *  - lone-partner 孤黑格只剩一个候选搭档 → 该格涂黑；
+   *  - no-room      放黑也成不了多米诺 → 涂白（含「没有可搭档的未知邻格」）；
+   *  - touch-clean  孤黑格的两个候选搭档的公共邻格必白；
+   *  - block-2x2    1×3/1×4/2×2/2×3/3×2/2×4/4×2/3×3 内黑格数达到上限
+   *                 → 其余涂白；超过上限 → 矛盾。
+   * 外加 Hall 必要性检查（未配对黑格的候选搭档数量不足 → 矛盾）。
    */
   propagate(out: Decision[] | null = null): boolean {
     const inQueue = new Uint8Array(this.n)
     const regionQueued = new Uint8Array(this.regionTotal)
     const queue: number[] = []
+    const regionQueue: number[] = []
     // 初始：所有格子都待查；所有区域都待扫描
     for (let i = 0; i < this.n; i++) {
       queue.push(i)
       inQueue[i] = 1
     }
-    this.regionDirty.fill(1)
+    for (let r = 0; r < this.regionTotal; r++) {
+      regionQueue.push(r)
+      regionQueued[r] = 1
+    }
 
-    const touchRegion = (r: number) => {
+    const scheduleRegion = (r: number) => {
       if (regionQueued[r]) return
       regionQueued[r] = 1
-      for (const c of this.byRegion[r]!) {
-        if (!inQueue[c]) {
-          inQueue[c] = 1
-          queue.push(c)
-        }
-      }
+      regionQueue.push(r)
     }
 
     const push = (i: number) => {
@@ -149,12 +156,16 @@ export class NorinoriEngine {
       }
     }
 
-    /** 落子并唤醒相关格（自身 + 邻格 + 同区域） */
+    /** 落子并唤醒相关格（自身 + 邻格 + 邻格所在区域） */
     const mark = (i: number, val: CellState, rule: RuleId) => {
+      if (this.marks[i] === val) return
       this.markCell(i, val, out, rule)
       push(i)
-      for (const nb of this.nbrs[i]!) push(nb)
-      touchRegion(this.regionId[i]!)
+      for (const nb of this.nbrs[i]!) {
+        push(nb)
+        scheduleRegion(this.regionId[nb]!)
+      }
+      scheduleRegion(this.regionId[i]!)
     }
 
     /**
@@ -170,7 +181,7 @@ export class NorinoriEngine {
       if (this.regionShaded[r]! >= 2) return false
       let shadedCnt = 0
       let lonely = false
-      let unkCnt = 0
+      const unkNbrs: number[] = []
       for (const k of this.nbrs[i]!) {
         const v = this.marks[k]!
         if (v === ON) {
@@ -178,12 +189,26 @@ export class NorinoriEngine {
           let p = 0
           for (const kk of this.nbrs[k]!) if (this.marks[kk] === ON) p++
           if (p === 0) lonely = true
-        } else if (v === UNK) unkCnt++
+        } else if (v === UNK) {
+          unkNbrs.push(k)
+        }
       }
       if (shadedCnt >= 2) return false
-      if (shadedCnt === 1 && !lonely) return false
-      if (shadedCnt === 0 && unkCnt === 0) return false
-      return true
+      if (shadedCnt === 1) return lonely
+      // 没有黑邻：必须存在一个「可能成为搭档」的未知邻格
+      //（该格所在区域没满，且它自己还没有黑邻）
+      for (const u of unkNbrs) {
+        if (this.regionShaded[this.regionId[u]!]! >= 2) continue
+        let hasOn = false
+        for (const kk of this.nbrs[u]!) {
+          if (this.marks[kk] === ON) {
+            hasOn = true
+            break
+          }
+        }
+        if (!hasOn) return true
+      }
+      return false
     }
 
     /** 孤黑格 s 的候选配对格判定：u 可涂黑，且 u 的黑邻格只有 s */
@@ -195,7 +220,98 @@ export class NorinoriEngine {
       return true
     }
 
-    while (queue.length) {
+    /**
+     * 小矩形超限规则：在任意 1×3、1×4、2×2、2×3、3×2、2×4、4×2、3×3 里，
+     * 黑格数不会超过 max（枚举验证：每个黑格在矩形内的黑邻格都不超过 1 个时的最大值）。
+     * 达到 max → 矩形其余格再加黑必超限，全部涂白；超过 max → 矛盾。
+     * 这条规则会顺带覆盖「2×2 黑格超限」。
+     */
+    const RECTS: Array<[number, number, number]> = [
+      [1, 3, 2],
+      [1, 4, 3],
+      [2, 2, 2],
+      [2, 3, 4],
+      [3, 2, 4],
+      [2, 4, 4],
+      [4, 2, 4],
+      [3, 3, 5],
+    ]
+    const checkRect = (x0: number, y0: number, ww: number, hh: number, max: number): boolean => {
+      let on = 0
+      const unk: number[] = []
+      for (let dy = 0; dy < hh; dy++) {
+        const rowBase = (y0 + dy) * this.w
+        for (let dx = 0; dx < ww; dx++) {
+          const q = rowBase + x0 + dx
+          if (this.marks[q] === ON) on++
+          else if (this.marks[q] === UNK) unk.push(q)
+        }
+      }
+      if (on > max) return false
+      if (on === max) for (const q of unk) mark(q, OFF, 'block-2x2')
+      return true
+    }
+
+    /** 检查包含格子 i 的所有小矩形（i 作为矩形内任意位置） */
+    const checkBlocksAt = (i: number): boolean => {
+      const cx = i % this.w
+      const cy = (i / this.w) | 0
+      for (const [ww, hh, max] of RECTS) {
+        for (let ox = ww - 1; ox >= 0; ox--) {
+          const x0 = cx - ox
+          if (x0 < 0 || x0 + ww > this.w) continue
+          for (let oy = hh - 1; oy >= 0; oy--) {
+            const y0 = cy - oy
+            if (y0 < 0 || y0 + hh > this.h) continue
+            if (!checkRect(x0, y0, ww, hh, max)) return false
+          }
+        }
+      }
+      return true
+    }
+
+    /**
+     * 区域规则扫描（只加可证明的局部定式）：
+     * - 区域已满 2 黑 → 其余必白；
+     * - 区域还需要 need 个黑格，而「可能变黑」的格子恰好 need 个 → 全部涂黑；
+     * - 可能变黑的格子少于 need → 矛盾。
+     * 注意本作的实际判定是「每区恰好 2 黑 + 黑格两两配成互不相贴的多米诺」，
+     * 一个多米诺可以跨区，所以不能假设「同区两黑必须相邻」。
+     */
+    const scanRegion = (r: number): boolean => {
+      const members = this.byRegion[r]!
+      const shaded = this.regionShaded[r]!
+      if (shaded > 2) return false
+      const need = 2 - shaded
+      if (need === 0) {
+        for (const c of members) if (this.marks[c] === UNK) mark(c, OFF, 'region-full')
+        return true
+      }
+      const unknowns: number[] = []
+      const cands: number[] = []
+      for (const c of members) {
+        if (this.marks[c] !== UNK) continue
+        unknowns.push(c)
+        if (canShade(c)) cands.push(c)
+      }
+      if (cands.length < need) return false
+      if (cands.length === need) {
+        const candSet = new Set(cands)
+        for (const c of unknowns) {
+          if (candSet.has(c)) mark(c, ON, 'region-last')
+          else mark(c, OFF, 'region-full')
+        }
+      }
+      return true
+    }
+
+    while (queue.length || regionQueue.length) {
+      if (regionQueue.length) {
+        const r = regionQueue.pop()!
+        regionQueued[r] = 0
+        if (!scanRegion(r)) return false
+        continue
+      }
       const i = queue.pop()!
       inQueue[i] = 0
       const v = this.marks[i]!
@@ -212,31 +328,12 @@ export class NorinoriEngine {
           mark(i, OFF, 'no-room')
           continue
         }
-        // 区域候选恰够：还需要 need 个黑格，而只有 need 个格子可能涂黑
-        // → 这些格必黑、其余必白；候选不足则矛盾
-        if (this.regionDirty[r]) {
-          this.regionDirty[r] = 0
-          const need = 2 - this.regionShaded[r]!
-          const unknowns: number[] = []
-          let cands = 0
-          for (const c of this.byRegion[r]!) {
-            if (this.marks[c] !== UNK) continue
-            unknowns.push(c)
-            if (canShade(c)) cands++
-          }
-          if (cands < need) return false
-          if (cands === need) {
-            for (const c of unknowns) {
-              if (this.marks[c] !== UNK) continue
-              if (canShade(c)) mark(c, ON, 'region-last')
-              else mark(c, OFF, 'region-full')
-            }
-          }
-        }
         continue
       }
 
       if (v === ON) {
+        // 2×2 超限检查
+        if (!checkBlocksAt(i)) return false
         const nb = this.nbrs[i]!
         let shaded = 0
         const unknownNbrs: number[] = []
@@ -251,7 +348,7 @@ export class NorinoriEngine {
           for (const k of unknownNbrs) mark(k, OFF, 'pair-clean')
           continue
         }
-        // 孤黑格：候选配对格收窄
+        // 孤黑格：配对格可以是任意相邻未知格（多米诺允许跨区）
         const cands = unknownNbrs.filter((u) => partnerCandidate(u, i))
         if (!cands.length) return false
         if (cands.length === 1) {
@@ -274,6 +371,58 @@ export class NorinoriEngine {
 
       // OFF：只可能影响区域计数（已在 markCell 时处理），无需再查
     }
+
+    /**
+     * 配对可行性（Hall 必要性）：还没配上对的黑格需要互不相同的搭档，
+     * 若少数几个黑格的候选搭档总数不够，则当前盘面必矛盾。
+     * 这是纯必要条件检查，用来更快发现假设检验里的死路。
+     */
+    const hallCheck = (): boolean => {
+      const cand: number[][] = []
+      for (let i = 0; i < this.n; i++) {
+        if (this.marks[i] !== ON) continue
+        let paired = false
+        for (const k of this.nbrs[i]!) {
+          if (this.marks[k] === ON) {
+            paired = true
+            break
+          }
+        }
+        if (paired) continue
+        const list: number[] = []
+        for (const u of this.nbrs[i]!) {
+          if (this.marks[u] !== UNK) continue
+          if (!partnerCandidate(u, i)) continue
+          list.push(u)
+        }
+        if (!list.length) return false
+        cand.push(list)
+      }
+      const m = cand.length
+      if (m < 2) return true
+      const unionSize = (idxs: number[]): number => {
+        const set = new Set<number>()
+        for (const idx of idxs) for (const u of cand[idx]!) set.add(u)
+        return set.size
+      }
+      for (let a = 0; a < m; a++) {
+        for (let b = a + 1; b < m; b++) {
+          if (unionSize([a, b]) < 2) return false
+        }
+      }
+      if (m <= 8) {
+        for (let a = 0; a < m; a++) {
+          for (let b = a + 1; b < m; b++) {
+            for (let c = b + 1; c < m; c++) {
+              if (unionSize([a, b, c]) < 3) return false
+            }
+          }
+        }
+      }
+      return true
+    }
+
+    if (!hallCheck()) return false
 
     // 收尾：区域计数矛盾兜底（候选/填满规则已在队列中处理）
     for (let r = 0; r < this.regionTotal; r++) {

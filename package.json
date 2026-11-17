@@ -8,6 +8,7 @@
     "start": "node scripts/dev.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "check": "node scripts/verify-puzzles.mjs",
     "import-image": "node scripts/import-image.mjs"
   },
   "devDependencies": {

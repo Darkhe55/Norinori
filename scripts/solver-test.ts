@@ -201,11 +201,17 @@ function bruteCount(p: Puzzle): number {
   }
 }
 
-// —— 用例 7：空盘传播不炸 ——
+// —— 用例 7：空盘传播不炸 / 判矛盾必须真的无解 ——
 {
+  // 2×2 单区：有解，空盘传播不应误判矛盾
+  const ok1 = new NorinoriEngine(mk('t7a', 2, 2, [0, 0, 0, 0])).propagate()
+  check('空盘传播不矛盾（有解题）', ok1)
+
+  // 5×5 随机分区（实际无解）：传播可以判矛盾，但判定必须可靠
   const p = mk('t7', 5, 5, [0, 0, 1, 1, 2, 0, 0, 1, 2, 2, 3, 3, 4, 2, 2, 3, 3, 4, 4, 4, 5, 5, 5, 5, 5])
-  const eng = new NorinoriEngine(p)
-  check('空盘传播不矛盾', eng.propagate())
+  const ok = new NorinoriEngine(p).propagate()
+  const exact = countSolutions(p, 1, 200_000)
+  check('空盘传播判矛盾 <=> 确实无解', !ok ? exact.count === 0 : true, `propagate=${ok} count=${exact.count}`)
 }
 
 // —— 用例 8：逻辑回放计划自洽（帧逐步应用 = 终态；解出则终态合法）——
